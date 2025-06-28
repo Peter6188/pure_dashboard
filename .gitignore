@@ -1,0 +1,29 @@
+# Virtual Environment
+venv/
+env/
+*.pyc
+__pycache__/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Data files (if large)
+# Uncomment if you don't want to include data files
+# *.csv
+# *.xlsx
+
+# Log files
+*.log
+
+# Cache
+.cache/

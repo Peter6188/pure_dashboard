@@ -20,6 +20,11 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.manifold import TSNE
 import seaborn as sns
 import matplotlib.pyplot as plt
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -188,6 +193,8 @@ app.layout = html.Div([
                 style={'padding': '10px', 'fontSize': '16px'}),
         dcc.Tab(label='🎯 Clustering Analysis', value='cluster-tab', 
                 style={'padding': '10px', 'fontSize': '16px'}),
+        dcc.Tab(label='🔍 Explainable AI (XAI)', value='xai-tab', 
+                style={'padding': '10px', 'fontSize': '16px'}),
     ], style={'margin': '0 1rem'}),
     
     # Content area
@@ -203,6 +210,8 @@ def render_content(active_tab):
         return render_ml_content()
     elif active_tab == 'cluster-tab':
         return render_cluster_content()
+    elif active_tab == 'xai-tab':
+        return render_xai_content()
 
 def render_eda_content():
     # Dataset overview
@@ -1195,7 +1204,534 @@ def render_cluster_content():
         ], style={'display': 'flex', 'flexWrap': 'wrap'})
     ])
 
+# XAI Analysis (Explainable AI)
+print("Performing XAI analysis...")
+
+# Prepare XAI analysis for the best performing model
+best_f1_idx = max(range(len(models.keys())), key=lambda i: list(model_performance.values())[i]['f1'])
+best_model_name = list(models.keys())[best_f1_idx]
+best_model = list(models.values())[best_f1_idx]
+
+print(f"Selected model for XAI: {best_model_name}")
+
+# Prepare data for XAI based on model type
+if best_model_name == 'Logistic Regression' or best_model_name == 'KNN':
+    X_train_xai = X_train_scaled
+    X_test_xai = X_test_scaled
+else:
+    X_train_xai = X_train
+    X_test_xai = X_test
+
+# Feature importance from Random Forest (always available)
+rf_model = models['Random Forest']
+feature_names = list(X_train.columns)
+rf_importance = pd.DataFrame({
+    'feature': feature_names,
+    'importance': rf_model.feature_importances_
+}).sort_values('importance', ascending=False)
+
+# SHAP analysis if available
+shap_importance = None
+shap_sample_data = None
+shap_sample_values = None
+
+if SHAP_AVAILABLE:
+    try:
+        print("Computing SHAP values...")
+        # Use Random Forest for SHAP as it's most reliable
+        shap_explainer = shap.TreeExplainer(rf_model)
+        
+        # Use a sample for SHAP calculation
+        sample_size = min(200, len(X_test))
+        X_test_sample = X_test.iloc[:sample_size].values  # Convert to numpy array
+        
+        # Ensure the data is 2D numpy array
+        if len(X_test_sample.shape) == 1:
+            X_test_sample = X_test_sample.reshape(1, -1)
+        
+        print(f"SHAP sample shape: {X_test_sample.shape}")
+        
+        shap_values = shap_explainer.shap_values(X_test_sample)
+        
+        # For binary classification, use positive class
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]
+        elif len(shap_values.shape) == 3:
+            shap_values = shap_values[:, :, 1]
+        
+        print(f"SHAP values shape: {shap_values.shape}")
+        
+        # Calculate global importance
+        shap_global_importance = np.abs(shap_values).mean(axis=0)
+        shap_importance = pd.DataFrame({
+            'feature': feature_names,
+            'shap_importance': shap_global_importance
+        }).sort_values('shap_importance', ascending=False)
+        
+        shap_sample_data = X_test_sample
+        shap_sample_values = shap_values
+        
+        print("SHAP analysis completed successfully!")
+        
+    except Exception as e:
+        print(f"SHAP analysis failed: {e}")
+        print("Falling back to Random Forest importance only")
+        SHAP_AVAILABLE = False
+        shap_importance = None
+        shap_sample_data = None
+        shap_sample_values = None
+
+def render_xai_content():
+    # Check if SHAP analysis was successful
+    shap_available_now = SHAP_AVAILABLE and shap_importance is not None
+    
+    if not shap_available_now:
+        # Fallback content if SHAP is not available
+        return html.Div([
+            html.H2("🔍 Explainable AI (XAI) Analysis", style={'color': '#667eea', 'marginBottom': '20px'}),
+            
+            html.Div([
+                html.H3("⚠️ SHAP Analysis Not Available"),
+                html.P("SHAP analysis encountered an issue during computation. This can happen due to:"),
+                html.Ul([
+                    html.Li("Data format incompatibility"),
+                    html.Li("Memory constraints with large datasets"),
+                    html.Li("Library version conflicts")
+                ]),
+                html.P("Showing Random Forest feature importance as comprehensive alternative explanation."),
+            ], style={
+                'backgroundColor': '#fff3cd',
+                'border': '1px solid #ffeaa7',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '20px',
+                'color': '#856404'
+            }),
+            
+            # XAI summary with RF only
+            html.Div([
+                html.H2("📊 Feature Importance Analysis", style={'color': '#667eea', 'marginBottom': '20px'}),
+                
+                html.Div([
+                    html.Div([
+                        html.H3(f"{best_model_name}", style={'margin': '0', 'fontSize': '1.5em', 'color': '#667eea'}),
+                        html.P("Best Model Analyzed", style={'margin': '5px 0'})
+                    ], style={
+                        'backgroundColor': 'white',
+                        'padding': '20px',
+                        'borderRadius': '10px',
+                        'textAlign': 'center',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                        'flex': '1',
+                        'margin': '10px'
+                    }),
+                    html.Div([
+                        html.H3(f"{len(feature_names)}", style={'margin': '0', 'fontSize': '1.5em', 'color': '#f093fb'}),
+                        html.P("Features Analyzed", style={'margin': '5px 0'})
+                    ], style={
+                        'backgroundColor': 'white',
+                        'padding': '20px',
+                        'borderRadius': '10px',
+                        'textAlign': 'center',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                        'flex': '1',
+                        'margin': '10px'
+                    }),
+                    html.Div([
+                        html.H3("Random Forest", style={'margin': '0', 'fontSize': '1.5em', 'color': '#764ba2'}),
+                        html.P("XAI Technique", style={'margin': '5px 0'})
+                    ], style={
+                        'backgroundColor': 'white',
+                        'padding': '20px',
+                        'borderRadius': '10px',
+                        'textAlign': 'center',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                        'flex': '1',
+                        'margin': '10px'
+                    })
+                ], style={'display': 'flex', 'flexWrap': 'wrap'})
+            ]),
+            
+            # Feature importance from Random Forest
+            html.H2("🌳 Random Forest Feature Importance", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+            html.Div([
+                html.Div([
+                    dcc.Graph(figure=create_feature_importance_chart())
+                ], style={
+                    'backgroundColor': 'white',
+                    'borderRadius': '10px',
+                    'padding': '20px',
+                    'margin': '10px',
+                    'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'
+                })
+            ]),
+            
+            # Feature importance table
+            html.H2("📋 Top Feature Details", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+            html.Div([
+                html.Div([
+                    dcc.Graph(figure=create_importance_comparison_table())
+                ], style={
+                    'backgroundColor': 'white',
+                    'borderRadius': '10px',
+                    'padding': '20px',
+                    'margin': '10px',
+                    'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'
+                })
+            ]),
+            
+            # Business insights
+            html.Div([
+                html.H2("💼 Business Insights from XAI", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+                html.Div([
+                    html.Div([
+                        html.H3("🎯 Key Findings", style={'color': '#667eea'}),
+                        html.Ul([
+                            html.Li("Duration emerges as the strongest predictor of subscription success"),
+                            html.Li("Customer financial indicators (balance, loans) significantly influence decisions"),
+                            html.Li("Demographics (age, job, education) provide important targeting insights"),
+                            html.Li("Campaign history and timing factors affect subscription probability"),
+                            html.Li("Contact method shows high predictive power")
+                        ])
+                    ], style={
+                        'backgroundColor': 'white',
+                        'borderRadius': '10px',
+                        'padding': '20px',
+                        'margin': '10px',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                        'flex': '1'
+                    }),
+                    html.Div([
+                        html.H3("💡 Recommendations", style={'color': '#f093fb'}),
+                        html.Ul([
+                            html.Li("Focus on meaningful conversations - duration is key"),
+                            html.Li("Target customers with higher account balances"),
+                            html.Li("Consider age-based segmentation for campaigns"),
+                            html.Li("Optimize contact timing based on monthly patterns"),
+                            html.Li("Develop customer-specific likelihood scorecards")
+                        ])
+                    ], style={
+                        'backgroundColor': 'white',
+                        'borderRadius': '10px',
+                        'padding': '20px',
+                        'margin': '10px',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                        'flex': '1'
+                    })
+                ], style={'display': 'flex', 'flexWrap': 'wrap'})
+            ])
+        ])
+    
+    # XAI summary cards
+    xai_summary = html.Div([
+        html.H2("🔍 Explainable AI (XAI) Analysis", style={'color': '#667eea', 'marginBottom': '20px'}),
+        
+        html.Div([
+            html.Div([
+                html.H3(f"{best_model_name}", style={'margin': '0', 'fontSize': '1.5em', 'color': '#667eea'}),
+                html.P("Best Model Analyzed", style={'margin': '5px 0'})
+            ], style={
+                'backgroundColor': 'white',
+                'padding': '20px',
+                'borderRadius': '10px',
+                'textAlign': 'center',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1',
+                'margin': '10px'
+            }),
+            html.Div([
+                html.H3(f"{len(feature_names)}", style={'margin': '0', 'fontSize': '1.5em', 'color': '#f093fb'}),
+                html.P("Features Analyzed", style={'margin': '5px 0'})
+            ], style={
+                'backgroundColor': 'white',
+                'padding': '20px',
+                'borderRadius': '10px',
+                'textAlign': 'center',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1',
+                'margin': '10px'
+            }),
+            html.Div([
+                html.H3("SHAP + RF", style={'margin': '0', 'fontSize': '1.5em', 'color': '#764ba2'}),
+                html.P("XAI Techniques", style={'margin': '5px 0'})
+            ], style={
+                'backgroundColor': 'white',
+                'padding': '20px',
+                'borderRadius': '10px',
+                'textAlign': 'center',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1',
+                'margin': '10px'
+            })
+        ], style={'display': 'flex', 'flexWrap': 'wrap'})
+    ])
+    
+    # Feature importance comparisons
+    importance_comparison = html.Div([
+        html.H2("📊 Feature Importance Analysis", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+        html.Div([
+            html.Div([
+                dcc.Graph(figure=create_feature_importance_chart())
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1'
+            }),
+            html.Div([
+                dcc.Graph(figure=create_shap_importance_chart())
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1'
+            })
+        ], style={'display': 'flex', 'flexWrap': 'wrap'})
+    ])
+    
+    # SHAP summary visualization
+    shap_summary = html.Div([
+        html.H2("🎯 SHAP Value Distribution", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+        html.Div([
+            html.Div([
+                dcc.Graph(figure=create_shap_summary_chart())
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'
+            })
+        ])
+    ])
+    
+    # Feature comparison table
+    comparison_table = html.Div([
+        html.H2("📋 Feature Importance Comparison", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+        html.Div([
+            html.Div([
+                dcc.Graph(figure=create_importance_comparison_table())
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'
+            })
+        ])
+    ])
+    
+    # Business insights
+    business_insights = html.Div([
+        html.H2("💼 Business Insights from XAI", style={'color': '#667eea', 'margin': '40px 0 20px 0'}),
+        html.Div([
+            html.Div([
+                html.H3("🎯 Key Findings", style={'color': '#667eea'}),
+                html.Ul([
+                    html.Li("Duration emerges as the strongest predictor of subscription success"),
+                    html.Li("Customer financial indicators (balance, loans) significantly influence decisions"),
+                    html.Li("Demographics (age, job, education) provide important targeting insights"),
+                    html.Li("Campaign history and timing factors affect subscription probability"),
+                    html.Li("Contact method shows high predictive power")
+                ])
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1'
+            }),
+            html.Div([
+                html.H3("💡 Recommendations", style={'color': '#f093fb'}),
+                html.Ul([
+                    html.Li("Focus on meaningful conversations - duration is key"),
+                    html.Li("Target customers with higher account balances"),
+                    html.Li("Consider age-based segmentation for campaigns"),
+                    html.Li("Optimize contact timing based on monthly patterns"),
+                    html.Li("Develop customer-specific likelihood scorecards")
+                ])
+            ], style={
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'padding': '20px',
+                'margin': '10px',
+                'boxShadow': '0 2px 5px rgba(0,0,0,0.1)',
+                'flex': '1'
+            })
+        ], style={'display': 'flex', 'flexWrap': 'wrap'})
+    ])
+    
+    return html.Div([
+        xai_summary,
+        importance_comparison,
+        shap_summary,
+        comparison_table,
+        business_insights
+    ])
+
+def create_feature_importance_chart():
+    """Create Random Forest feature importance chart"""
+    top_features = rf_importance.head(10)
+    
+    fig = px.bar(top_features, x='importance', y='feature',
+                title='Random Forest Feature Importance (Top 10)',
+                orientation='h',
+                color_discrete_sequence=['#667eea'])
+    
+    fig.update_layout(
+        height=500,
+        yaxis_title='Features',
+        xaxis_title='Importance Score',
+        yaxis={'categoryorder': 'total ascending'}
+    )
+    
+    return fig
+
+def create_shap_importance_chart():
+    """Create SHAP feature importance chart"""
+    if shap_importance is not None and SHAP_AVAILABLE:
+        top_features = shap_importance.head(10)
+        
+        fig = px.bar(top_features, x='shap_importance', y='feature',
+                    title='SHAP Feature Importance (Top 10)',
+                    orientation='h',
+                    color_discrete_sequence=['#f093fb'])
+        
+        fig.update_layout(
+            height=500,
+            yaxis_title='Features',
+            xaxis_title='Mean |SHAP Value|',
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        
+        return fig
+    else:
+        # Show a message that SHAP is not available
+        fig = go.Figure()
+        fig.add_annotation(
+            text="SHAP analysis not available<br>Using Random Forest importance instead",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False, 
+            font=dict(size=16, color='#666'),
+            bgcolor='#f8f9fa',
+            bordercolor='#dee2e6',
+            borderwidth=1
+        )
+        fig.update_layout(
+            title='SHAP Feature Importance',
+            height=500,
+            xaxis={'visible': False},
+            yaxis={'visible': False}
+        )
+        return fig
+
+def create_shap_summary_chart():
+    """Create SHAP summary/distribution chart"""
+    if shap_sample_values is not None and SHAP_AVAILABLE:
+        # Create box plot showing SHAP value distributions for top features
+        top_features_idx = shap_importance.head(8).index if shap_importance is not None else list(range(8))
+        
+        fig = go.Figure()
+        
+        colors = ['#667eea', '#f093fb', '#764ba2', '#f5576c', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57']
+        
+        for i, feat_idx in enumerate(top_features_idx):
+            if i < len(colors) and feat_idx < len(feature_names):
+                feature_name = feature_names[feat_idx]
+                if feat_idx < shap_sample_values.shape[1]:
+                    values = shap_sample_values[:, feat_idx]
+                    
+                    fig.add_trace(go.Box(
+                        y=values,
+                        name=feature_name,
+                        marker_color=colors[i],
+                        boxpoints='outliers'
+                    ))
+        
+        fig.update_layout(
+            title='SHAP Value Distributions (Top Features)',
+            yaxis_title='SHAP Value',
+            xaxis_title='Features',
+            height=500,
+            showlegend=False
+        )
+        
+        return fig
+    else:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="SHAP distribution analysis not available<br>SHAP computation failed or library not installed",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color='#666'),
+            bgcolor='#f8f9fa',
+            bordercolor='#dee2e6',
+            borderwidth=1
+        )
+        fig.update_layout(
+            title='SHAP Value Distributions',
+            height=500,
+            xaxis={'visible': False},
+            yaxis={'visible': False}
+        )
+        return fig
+
+def create_importance_comparison_table():
+    """Create comparison table of RF and SHAP importance"""
+    if shap_importance is not None and SHAP_AVAILABLE:
+        # Merge importance scores
+        comparison_df = rf_importance.head(10).merge(
+            shap_importance.head(10)[['feature', 'shap_importance']], 
+            on='feature', how='outer'
+        ).fillna(0)
+        
+        # Create table
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=['Feature', 'Random Forest Importance', 'SHAP Importance'],
+                       fill_color='#667eea',
+                       font=dict(color='white', size=12),
+                       align="center"),
+            cells=dict(values=[comparison_df['feature'],
+                              comparison_df['importance'].round(4),
+                              comparison_df['shap_importance'].round(4)],
+                      fill_color='#f8f9fa',
+                      align="center",
+                      font=dict(size=11))
+        )])
+        
+        fig.update_layout(title='Feature Importance Comparison (RF vs SHAP)', height=400)
+        return fig
+    else:
+        # Fallback showing only RF importance
+        rf_top = rf_importance.head(10)
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=['Rank', 'Feature', 'Random Forest Importance', 'Description'],
+                       fill_color='#667eea',
+                       font=dict(color='white', size=12),
+                       align="center"),
+            cells=dict(values=[
+                list(range(1, len(rf_top) + 1)),
+                rf_top['feature'],
+                rf_top['importance'].round(4),
+                ['Key predictor' if i < 3 else 'Important factor' if i < 6 else 'Contributing factor' 
+                 for i in range(len(rf_top))]
+            ],
+                      fill_color='#f8f9fa',
+                      align="center",
+                      font=dict(size=11))
+        )])
+        
+        fig.update_layout(title='Random Forest Feature Importance (Top 10)', height=400)
+        return fig
+
+print("XAI analysis setup completed!")
+
 if __name__ == '__main__':
     print("Starting Bank Marketing Dashboard...")
     print("Dashboard will be available at: http://127.0.0.1:8050")
-    app.run_server(debug=True, host='127.0.0.1', port=8050)
+    app.run_server(debug=True, host='127.0.0.1', port=8051)

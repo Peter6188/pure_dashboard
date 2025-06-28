@@ -22,6 +22,7 @@ A comprehensive interactive dashboard that combines all analysis results from th
 - Performance comparison across all metrics
 - Feature importance analysis
 - Confusion matrix visualization
+- ROC curves and detailed metrics
 - Best model identification
 
 ### 🎯 Clustering & Dimensionality Reduction
@@ -30,6 +31,15 @@ A comprehensive interactive dashboard that combines all analysis results from th
 - Cluster size distribution
 - Feature correlation heatmap
 - Explained variance analysis
+- t-SNE visualization
+
+### 🔍 Explainable AI (XAI)
+- SHAP (SHapley Additive exPlanations) analysis
+- Random Forest feature importance
+- Global feature importance rankings
+- SHAP value distributions
+- Model interpretability insights
+- Business recommendations based on XAI findings
 
 ## Installation & Setup
 
