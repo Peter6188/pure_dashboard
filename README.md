@@ -1,3 +1,5 @@
+# pure_dashboard
+
 # Bank Marketing Dataset Dashboard
 
 A comprehensive interactive dashboard that combines all analysis results from the three Jupyter notebooks (Part1, Part2, Part3) into a single, professional web application using Dash.
